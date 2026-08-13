@@ -6,21 +6,18 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 import sys
 import os
 
-# --- تنظیمات ---
 MAX_SEQUENCE_LENGTH = 20
 
 def load_titles(domain, data_dir):
     titles = {}
     try:
         if domain == 'movie':
-            # فرمت MovieLens
             movies_file = os.path.join(data_dir, 'movies.dat')
             if os.path.exists(movies_file):
                 df = pd.read_csv(movies_file, sep='::', engine='python', encoding='latin-1', header=None, names=['ID', 'Title', 'Genre'])
                 titles = dict(zip(df['ID'], df['Title']))
         
         elif domain == 'book':
-            # فرمت Goodbooks
             books_file = os.path.join(data_dir, 'books.csv')
             if os.path.exists(books_file):
                 df = pd.read_csv(books_file)
@@ -41,7 +38,6 @@ def main():
     data_dir = f"{domain}_data"
     processed_file = os.path.join(data_dir, 'processed_data.npz')
     
-    # --- تغییر مهم: فقط مدل کامل هیبرید را لود می‌کنیم ---
     model_file = os.path.join(data_dir, 'final_hybrid_model.keras')
 
     print(f"--- سیستم پیشنهادگر پیشرفته (NCF + LSTM + Attention) ---")
@@ -52,22 +48,16 @@ def main():
         print("لطفاً ابتدا 'python train_final_hybrid_model.py' را برای این دامنه اجرا کنید.")
         return
 
-    # 1. بارگذاری داده‌ها
     print("⏳ بارگذاری داده‌ها...")
     data = np.load(processed_file)
     X_item = data['X_item']
     X_time = data['X_time']
-    # X_user = data['X_user'] # (اختیاری برای چک کردن)
-    
-    # پیدا کردن تاریخچه کاربر
-    # فرض می‌کنیم user_id_input دقیقاً معادل ایندکس آرایه است (برای سادگی)
-    # در سیستم واقعی باید map کنیم
+
     user_idx = user_id_input if user_id_input < len(X_item) else 0
 
     current_item_seq = list(X_item[user_idx][X_item[user_idx] > 0])
     current_time_seq = list(X_time[user_idx][X_time[user_idx] > 0])
     
-    # بارگذاری مدل و عناوین
     print(f"⏳ بارگذاری مدل {os.path.basename(model_file)}...")
     model = load_model(model_file)
     titles_map = load_titles(domain, data_dir)
@@ -75,31 +65,25 @@ def main():
     print("✅ سیستم آماده است.")
     print("-" * 50)
 
-    # متغیر برای ذخیره لیست پیشنهادی دور قبل
     last_recommended_ids = set()
 
     while True:
-        # نمایش تاریخچه
         print("\n📜 تاریخچه (5 تای آخر):")
         recent = current_item_seq[-5:]
         for item_id in recent:
             title = titles_map.get(item_id, f"Item {item_id}")
             print(f"   - {title}")
 
-        # آماده‌سازی ورودی
         user_input = np.array([user_idx]) 
         item_seq_input = pad_sequences([current_item_seq], maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
         time_seq_input = pad_sequences([current_time_seq], maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
         
-        # پیش‌بینی
         preds = model.predict([user_input, item_seq_input, time_seq_input], verbose=0)[0]
 
-        # حذف فیلم‌های دیده‌شده (امتیاز منفی)
         for seen_item in current_item_seq:
             if seen_item < len(preds):
                 preds[seen_item] = -1.0
 
-        # 10 پیشنهاد برتر
         top_indices = preds.argsort()[::-1][:10]
 
         print("\n🎁 پیشنهادات جدید (Hybrid AI):")
@@ -110,20 +94,16 @@ def main():
             prob = preds[item_id] * 100
             if prob < 0: prob = 0
             
-            # --- منطق علامت جدید ---
             if (len(last_recommended_ids) > 0) and (item_id not in last_recommended_ids):
                 new_tag = " 🆕"
             else:
                 new_tag = ""
-            # -----------------------
 
             print(f"   [{rank}] {title} ({prob:.1f}%){new_tag}")
             current_recommendations.append(item_id)
 
-        # آپدیت لیست قبلی برای دور بعد
         last_recommended_ids = set(current_recommendations)
 
-        # انتخاب
         print("\n👇 انتخاب (1-10) یا 'q':")
         choice = input("> ")
 
@@ -133,7 +113,7 @@ def main():
         try:
             choice_idx = int(choice) - 1
             if 0 <= choice_idx < 10:
-                selected_item = current_recommendations[choice_idx] # تغییر نام متغیر برای خوانایی
+                selected_item = current_recommendations[choice_idx]
                 
                 if preds[selected_item] == -1.0:
                     print("❌ تکراری.")
@@ -142,7 +122,6 @@ def main():
                 title = titles_map.get(selected_item, f"Item {selected_item}")
                 print(f"✅ انتخاب شد: {title}")
                 
-                # آپدیت تاریخچه
                 current_item_seq.append(selected_item)
                 last_time = current_time_seq[-1] if current_time_seq else 1
                 current_time_seq.append(last_time)
