@@ -8,8 +8,12 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
-import sys 
-import os 
+import sys
+import os
+import json
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 def main(domain):
     data_dir = f"{domain}_data"
@@ -113,9 +117,58 @@ def main(domain):
     early_stopper = EarlyStopping(monitor='val_top_10_acc', patience=3, verbose=1, mode='max', restore_best_weights=True)
 
     print(f"شروع آموزش مدل نهایی {domain}...")
-    model.fit(X_train, y_train, batch_size=256, epochs=100, validation_data=(X_test, y_test), callbacks=[early_stopper])
+    history = model.fit(X_train, y_train, batch_size=256, epochs=100, validation_data=(X_test, y_test), callbacks=[early_stopper])
 
-    print("\n--- ۵. ارزیابی نهایی مدل ---")
+    print("\n--- ۵. ذخیره تاریخچه آموزش و رسم نمودارها ---")
+    history_keys = list(history.history.keys())
+    print(f"کلیدهای history.history: {history_keys}")
+
+    history_file = os.path.join(data_dir, 'training_history.json')
+    with open(history_file, 'w') as f:
+        json.dump({k: [float(x) for x in v] for k, v in history.history.items()}, f, indent=2)
+    print(f"تاریخچه آموزش در '{history_file}' ذخیره شد.")
+
+    epochs_range = range(1, len(history.history['loss']) + 1)
+    COLOR_TRAIN = '#1B6CA8'
+    COLOR_VAL   = '#E76F51'
+
+    # Plot A — Loss convergence
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs_range, history.history['loss'], color=COLOR_TRAIN, linewidth=2, label='Training Loss')
+    ax.plot(epochs_range, history.history['val_loss'], color=COLOR_VAL, linewidth=2, label='Validation Loss')
+    ax.set_title('Model Convergence (Loss)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel('Loss', fontsize=12)
+    ax.legend(fontsize=11)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    loss_fig_path = os.path.join(data_dir, 'fig_loss.png')
+    fig.savefig(loss_fig_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"نمودار Loss در '{loss_fig_path}' ذخیره شد.")
+
+    # Resolve the real top-10 accuracy key (name='top_10_acc' → key 'top_10_acc')
+    top10_train_key = next((k for k in history_keys if 'top_10' in k and not k.startswith('val_')), None)
+    top10_val_key   = next((k for k in history_keys if 'top_10' in k and k.startswith('val_')), None)
+
+    if top10_train_key and top10_val_key:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(epochs_range, history.history[top10_train_key], color=COLOR_TRAIN, linewidth=2, label='Training HR@10')
+        ax.plot(epochs_range, history.history[top10_val_key],   color=COLOR_VAL,   linewidth=2, label='Validation HR@10')
+        ax.set_title('Top-10 Accuracy over Epochs', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Epoch', fontsize=12)
+        ax.set_ylabel('HR@10 (Top-10 Accuracy)', fontsize=12)
+        ax.legend(fontsize=11)
+        ax.grid(alpha=0.3)
+        plt.tight_layout()
+        acc_fig_path = os.path.join(data_dir, 'fig_top10_acc.png')
+        fig.savefig(acc_fig_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"نمودار Top-10 Accuracy در '{acc_fig_path}' ذخیره شد.")
+    else:
+        print(f"هشدار: کلید top_10_acc در history پیدا نشد. کلیدهای موجود: {history_keys}")
+
+    print("\n--- ۶. ارزیابی نهایی مدل ---")
     results = model.evaluate(X_test, y_test)
     print(f"✅ مدل {domain} (Final Hybrid) با موفقیت آموزش دید.")
     print(f"Loss (خطا) روی داده‌های تست: {results[0]:.4f}")
