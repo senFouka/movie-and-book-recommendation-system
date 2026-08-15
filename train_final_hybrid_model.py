@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.model_selection import train_test_split
+import random as py_random
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
@@ -11,6 +11,13 @@ from tensorflow.keras.callbacks import EarlyStopping
 import sys
 import os
 import json
+
+# روی ویندوز اگر خروجی به فایل/pipe هدایت شود، پایتون از cp1252 استفاده می‌کند
+# و چاپ متن فارسی با UnicodeEncodeError کرش می‌کند. اجباراً UTF-8 می‌کنیم.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -29,33 +36,32 @@ def main(domain):
         print(f"فایل '{processed_file}' پیدا نشد.")
         return
 
-    # --- ورودی‌ها رو کامل بارگذاری می‌کنیم ---
-    X_user = data['X_user']
-    X_item = data['X_item']
-    X_time = data['X_time']
-    y = data['y']
+    # --- بارگذاری آرایه‌های از پیش تقسیم‌شده (leave-one-out) ---
+    X_user_train = data['X_user_train']
+    X_item_train = data['X_item_train']
+    X_time_train = data['X_time_train']
+    y_train      = data['y_train']
+
+    X_user_test  = data['X_user_test']
+    X_item_test  = data['X_item_test']
+    X_time_test  = data['X_time_test']
+    y_test       = data['y_test']
 
     n_users = int(data['n_users'])
     n_items = int(data['n_items'])
     n_time_features = int(data['n_time_features'])
-    MAX_SEQUENCE_LENGTH = X_item.shape[1] 
+    MAX_SEQUENCE_LENGTH = X_item_train.shape[1]
 
     print(f"تعداد کاربران: {n_users}")
     print(f"تعداد آیتم‌ها: {n_items}")
     print(f"تعداد دسته‌های زمانی: {n_time_features}")
 
-    print("\n--- ۲. تقسیم داده‌ها ---")
-    indices = np.arange(y.shape[0])
-    train_indices, test_indices = train_test_split(indices, test_size=0.2, random_state=42)
+    print("\n--- ۲. تقسیم داده‌ها (leave-one-out) ---")
+    X_train = [X_user_train, X_item_train, X_time_train]
+    X_test  = [X_user_test,  X_item_test,  X_time_test]
 
-    # --- مدل نهایی ما ۳ ورودی دارد ---
-    X_train = [X_user[train_indices], X_item[train_indices], X_time[train_indices]]
-    X_test = [X_user[test_indices], X_item[test_indices], X_time[test_indices]]
-
-    y_train = y[train_indices]
-    y_test = y[test_indices]
-    
     print(f"تعداد نمونه‌های آموزشی: {len(y_train)}")
+    print(f"تعداد نمونه‌های تست (یک به‌ازای هر کاربر): {len(y_test)}")
 
 
     print("\n--- ۳. ساخت معماری نهایی (NCF + Dual-LSTM + Masked-Attention) ---")
@@ -168,15 +174,63 @@ def main(domain):
     else:
         print(f"هشدار: کلید top_10_acc در history پیدا نشد. کلیدهای موجود: {history_keys}")
 
-    print("\n--- ۶. ارزیابی نهایی مدل ---")
+    print("\n--- ۶. ارزیابی نهایی مدل (Full-Vocab Keras Metrics) ---")
     results = model.evaluate(X_test, y_test)
     print(f"✅ مدل {domain} (Final Hybrid) با موفقیت آموزش دید.")
     print(f"Loss (خطا) روی داده‌های تست: {results[0]:.4f}")
     print(f"Accuracy (دقت) روی داده‌های تست: {results[1] * 100:.2f}%")
-    print(f"Top 10 Accuracy روی داده‌های تست: {results[2] * 100:.2f}%")
+    print(f"Top 10 Accuracy (full-vocab) روی داده‌های تست: {results[2] * 100:.2f}%")
 
     model.save(model_file)
     print(f"مدل نهایی در '{model_file}' ذخیره شد.")
+
+    print("\n--- ۷. ارزیابی NCF-Protocol: HR@10 و NDCG@10 (1 مثبت در برابر 99 منفی) ---")
+    NUM_NEG = 99
+    EVAL_CHUNK = 512
+    rng = np.random.default_rng(seed=42)
+    hits = 0
+    ndcg_sum = 0.0
+    n_test = len(y_test)
+
+    print(f"پیش‌بینی دسته‌ای برای {n_test} کاربر تست...")
+    for start in range(0, n_test, EVAL_CHUNK):
+        end = min(start + EVAL_CHUNK, n_test)
+        preds = model.predict(
+            [X_user_test[start:end], X_item_test[start:end], X_time_test[start:end]],
+            batch_size=256, verbose=0
+        )
+        for local_i in range(end - start):
+            target = int(y_test[start + local_i])
+            pred_vec = preds[local_i]
+
+            # نمونه‌برداری 99 آیتم منفی (بدون جایگزینی، با حذف آیتم هدف و پدینگ)
+            neg_pool = np.arange(1, n_items)
+            neg_pool = neg_pool[neg_pool != target]
+            negatives = rng.choice(neg_pool, size=NUM_NEG, replace=False)
+
+            candidates = np.concatenate([[target], negatives])
+            scores = pred_vec[candidates]
+
+            order = np.argsort(scores)[::-1]
+            ranked = candidates[order]
+            top10 = ranked[:10]
+
+            if target in top10:
+                hits += 1
+                rank = int(np.where(top10 == target)[0][0]) + 1  # 1-indexed
+                ndcg_sum += 1.0 / np.log2(rank + 1)
+
+        if (start // EVAL_CHUNK) % 10 == 0:
+            print(f"  پیشرفت: {end}/{n_test}")
+
+    hr10   = hits / n_test
+    ndcg10 = ndcg_sum / n_test
+
+    print("\n" + "=" * 55)
+    print(f"  دامنه: {domain.upper()}")
+    print(f"  HR@10  (NCF Protocol, 1 vs {NUM_NEG}): {hr10  * 100:.2f}%")
+    print(f"  NDCG@10(NCF Protocol, 1 vs {NUM_NEG}): {ndcg10 * 100:.2f}%")
+    print("=" * 55)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

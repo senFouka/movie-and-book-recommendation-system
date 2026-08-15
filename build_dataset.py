@@ -69,35 +69,56 @@ def main(domain):
     n_time_features = data['TimeOfDay_encoded'].nunique() + 1
     print(f"تعداد دسته‌های زمانی (با احتساب پدینگ): {n_time_features}")
 
-    print("\n--- ۳. ساخت دنباله‌ها ---")
+    print("\n--- ۳. ساخت دنباله‌ها (تقسیم leave-one-out) ---")
     data = data.sort_values(['UserID_encoded', 'Timestamp'])
     grouped = data.groupby('UserID_encoded')
-    all_users, all_item_sequences, all_time_sequences, all_next_item = [], [], [], []
     MIN_SEQUENCE_LENGTH = 3
-    MAX_SEQUENCE_LENGTH = 20 
+    MAX_SEQUENCE_LENGTH = 20
+
+    tr_users, tr_item_seqs, tr_time_seqs, tr_labels = [], [], [], []
+    te_users, te_item_seqs, te_time_seqs, te_labels = [], [], [], []
 
     for user_id, group in grouped:
         item_list = group['ItemID_encoded'].tolist()
         time_list = group['TimeOfDay_encoded'].tolist()
-        if len(item_list) < MIN_SEQUENCE_LENGTH: continue
-        for i in range(1, len(item_list)):
-            all_users.append(user_id)
-            all_item_sequences.append(item_list[:i])
-            all_time_sequences.append(time_list[:i])
-            all_next_item.append(item_list[i])
-    print(f"تعداد کل دنباله‌های آموزشی ساخته شده: {len(all_item_sequences)}")
+        if len(item_list) < MIN_SEQUENCE_LENGTH:
+            continue
+
+        # یک نمونه تست: تمام تاریخچه به‌جز آخری → آیتم آخر
+        te_users.append(user_id)
+        te_item_seqs.append(item_list[:-1])
+        te_time_seqs.append(time_list[:-1])
+        te_labels.append(item_list[-1])
+
+        # نمونه‌های آموزشی: پیشوندهای رشد‌یابنده، بدون لمس آیتم آخر
+        for i in range(1, len(item_list) - 1):
+            tr_users.append(user_id)
+            tr_item_seqs.append(item_list[:i])
+            tr_time_seqs.append(time_list[:i])
+            tr_labels.append(item_list[i])
+
+    print(f"دنباله‌های آموزشی: {len(tr_labels)}")
+    print(f"نمونه‌های تست (leave-one-out، یک به‌ازای هر کاربر): {len(te_labels)}")
 
     print("\n--- ۴. پدینگ دنباله‌ها ---")
-    X_user = np.array(all_users)
-    X_item = pad_sequences(all_item_sequences, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
-    X_time = pad_sequences(all_time_sequences, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
-    y = np.array(all_next_item)
+    X_user_train = np.array(tr_users)
+    X_item_train = pad_sequences(tr_item_seqs, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
+    X_time_train = pad_sequences(tr_time_seqs, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
+    y_train      = np.array(tr_labels)
+
+    X_user_test  = np.array(te_users)
+    X_item_test  = pad_sequences(te_item_seqs, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
+    X_time_test  = pad_sequences(te_time_seqs, maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
+    y_test       = np.array(te_labels)
 
     print("\n--- ۵. ذخیره فایل‌ها ---")
     output_path = os.path.join(data_dir, 'processed_data.npz')
     np.savez_compressed(
-        output_path, 
-        X_user=X_user, X_item=X_item, X_time=X_time, y=y, 
+        output_path,
+        X_user_train=X_user_train, X_item_train=X_item_train,
+        X_time_train=X_time_train, y_train=y_train,
+        X_user_test=X_user_test,   X_item_test=X_item_test,
+        X_time_test=X_time_test,   y_test=y_test,
         n_users=n_users, n_items=n_items, n_time_features=n_time_features
     )
     print(f"داده‌های پردازش شده در '{output_path}' ذخیره شدند.")

@@ -1,0 +1,9 @@
+{
+  "domain": "book",
+  "protocol": "leave-one-out, 1 positive vs 99 sampled negatives",
+  "n_test_users": 53424,
+  "seed": 42,
+  "HR@10": 0.7678758610362384,
+  "NDCG@10": 0.5380175521457247,
+  "mean_rank": 8.644429469901167
+}
