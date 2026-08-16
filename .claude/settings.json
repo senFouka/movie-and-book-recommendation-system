@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PYTHONIOENCODING = 'utf-8'; & .\\\\venv\\\\Scripts\\\\python.exe build_dataset.py book)",
+      "PowerShell($env:PYTHONIOENCODING = 'utf-8'; & .\\\\venv\\\\Scripts\\\\python.exe \"C:\\\\Users\\\\taham\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Projects-uni\\\\c84ff2b1-e61c-4071-97c2-a00299f03c0d\\\\scratchpad\\\\verify_split.py\" book)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe train_final_hybrid_model.py movie > \"/c/Users/taham/AppData/Local/Temp/claude/d--Projects-uni/c84ff2b1-e61c-4071-97c2-a00299f03c0d/scratchpad/train_movie.log\" 2>&1)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe train_final_hybrid_model.py book)",
+      "Bash(LOG=\"/c/Users/taham/AppData/Local/Temp/claude/d--Projects-uni/c84ff2b1-e61c-4071-97c2-a00299f03c0d/scratchpad/train_movie.log\"; sed 's/\\\\x1b\\\\[[0-9;]*m//g' \"$LOG\" | grep -av \"━\" | tail -n 45; echo \"=== history/plot files ===\"; ls -la movie_data/ | grep -i \"history\\\\|png\")",
+      "Bash(LOG=\"/c/Users/taham/AppData/Local/Temp/claude/d--Projects-uni/c84ff2b1-e61c-4071-97c2-a00299f03c0d/scratchpad/train_book.log\"; sed 's/\\\\x1b\\\\[[0-9;]*m//g' \"$LOG\" | grep -a \"early stopping\\\\|Restoring\"; echo \"=== EPOCH ENDS ===\"; grep -a \"^.22720/22720\" \"$LOG\" | sed 's/\\\\x1b\\\\[[0-9;]*m//g' | grep -a \"val_loss\" ; echo \"=== FINAL ===\"; sed 's/\\\\x1b\\\\[[0-9;]*m//g' \"$LOG\" | grep -av \"━\" | tail -n 30)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c \"import scipy; print\\('scipy', scipy.__version__\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe evaluate_full_metrics.py movie)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(sed 's/\\\\x1b\\\\[[0-9;]*m//g' \"/c/Users/taham/AppData/Local/Temp/claude/d--Projects-uni/c84ff2b1-e61c-4071-97c2-a00299f03c0d/scratchpad/eval_movie.log\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\taham\\AppData\\Local\\Temp\\claude\\d--Projects-uni\\c84ff2b1-e61c-4071-97c2-a00299f03c0d\\scratchpad"
+    ]
+  }
+}

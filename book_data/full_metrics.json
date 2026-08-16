@@ -1,0 +1,77 @@
+{
+  "domain": "book",
+  "protocol": {
+    "name": "leave-one-out, 1 positive vs 99 sampled negatives",
+    "seed": 42,
+    "n_test_users": 53424,
+    "n_train_samples": 5816207,
+    "catalog_size_excluding_padding": 10000,
+    "evaluated_on": "test set only (never used during training or EarlyStopping)",
+    "model_file": "book_data\\final_hybrid_model.keras",
+    "retrained": false
+  },
+  "ranking_metrics": {
+    "Proposed (Hybrid NCF+LSTM+Attention)": {
+      "HR@5": 0.6375224618149147,
+      "NDCG@5": 0.4939835370546007,
+      "Precision@5": 0.12750449236298295,
+      "Recall@5": 0.6375224618149147,
+      "HR@10": 0.7675950883498053,
+      "NDCG@10": 0.5361989444997853,
+      "Precision@10": 0.07675950883498053,
+      "Recall@10": 0.7675950883498053,
+      "MRR": 0.4753165626760268,
+      "MeanRank": 8.747809973045822
+    },
+    "Popularity (TopPop)": {
+      "HR@5": 0.23977987421383648,
+      "NDCG@5": 0.1574218943302995,
+      "Precision@5": 0.0479559748427673,
+      "Recall@5": 0.23977987421383648,
+      "HR@10": 0.35240715783168614,
+      "NDCG@10": 0.19361096743148823,
+      "Precision@10": 0.03524071578316861,
+      "Recall@10": 0.35240715783168614,
+      "MRR": 0.16671206896421398,
+      "MeanRank": 31.297038784067087
+    },
+    "ItemKNN (cosine, k=20)": {
+      "HR@5": 0.42647499251272836,
+      "NDCG@5": 0.27194748906830174,
+      "Precision@5": 0.08529499850254567,
+      "Recall@5": 0.42647499251272836,
+      "HR@10": 0.6108677747828691,
+      "NDCG@10": 0.33160105326323064,
+      "Precision@10": 0.06108677747828691,
+      "Recall@10": 0.6108677747828691,
+      "MRR": 0.26433570695029035,
+      "MeanRank": 13.896001796945193
+    }
+  },
+  "rating_error_metrics": {
+    "applicable_as_rating_prediction": false,
+    "why_not": "The model outputs a softmax distribution over the item vocabulary and is trained with sparse categorical cross-entropy for next-item ranking. It never receives or predicts the explicit Rating column, so classical rating-prediction RMSE/MAE is undefined for this architecture.",
+    "surrogate_definition": "Error between the predicted probability of each of the 100 candidates and a binary relevance target (1 for the held-out positive item, 0 for the 99 sampled negatives), averaged over all candidate slots.",
+    "RMSE_raw_softmax_vs_binary_relevance": 0.09823530542120307,
+    "MAE_raw_softmax_vs_binary_relevance": 0.009870789810265288,
+    "RMSE_candidate_normalized_vs_binary_relevance": 0.08978759608905651,
+    "MAE_candidate_normalized_vs_binary_relevance": 0.015302379094610763
+  },
+  "beyond_accuracy_metrics": {
+    "recommendation_list_size": 10,
+    "scope": "top-10 over the full catalog for every test user (padding index 0 excluded)",
+    "coverage": 0.8535,
+    "coverage_unique_items": 8535,
+    "coverage_definition": "fraction of catalog items appearing in at least one test user's top-10 list",
+    "diversity": 0.6170753775570038,
+    "diversity_definition": "mean intra-list dissimilarity: average over all item pairs in a list of (1 - cosine similarity) between the model's learned item embeddings, then averaged over users. No genre features are wired into the model, so the embedding space is used as the item similarity space.",
+    "novelty_bits": 12.097841166474197,
+    "novelty_definition": "mean self-information -log2(p_i) of recommended items, where p_i = (train_count_i + 1) / (total_train_interactions + catalog_size) (Laplace smoothing so that never-trained items stay finite).",
+    "recommended_slots_with_zero_train_frequency": 0,
+    "total_recommended_slots": 534240
+  },
+  "baselines": {
+    "Popularity (TopPop)": "candidates ranked by their training-set frequency; ties broken by a fixed seed-42 random key",
+    "ItemKNN (cosine, k=20)": "item-based CF: cosine similarity on the binary user-item training matrix; each candidate is scored by the sum of its top-20 similarities to the items in the user's training history (self-similarity excluded)"
+  }
+}

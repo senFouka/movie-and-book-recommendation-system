@@ -1,0 +1,99 @@
+{
+  "domain": "movie",
+  "protocol": {
+    "name": "leave-one-out, 1 positive vs 99 sampled negatives",
+    "seed": 42,
+    "n_test_users": 6040,
+    "n_train_samples": 982089,
+    "catalog_size_excluding_padding": 3706,
+    "evaluated_on": "test set only (never used during training or EarlyStopping)",
+    "model_file": "movie_data\\final_hybrid_model.keras",
+    "retrained": false
+  },
+  "ranking_metrics": {
+    "Proposed (Hybrid NCF+LSTM+Attention)": {
+      "HR@5": 0.6809602649006623,
+      "NDCG@5": 0.5270029597836468,
+      "Precision@5": 0.13619205298013246,
+      "Recall@5": 0.6809602649006623,
+      "HR@10": 0.7850993377483444,
+      "NDCG@10": 0.5610039233454386,
+      "Precision@10": 0.07850993377483444,
+      "Recall@10": 0.7850993377483444,
+      "MRR": 0.5000654953393402,
+      "MeanRank": 8.427649006622516
+    },
+    "Popularity (TopPop)": {
+      "HR@5": 0.26605960264900663,
+      "NDCG@5": 0.1683444732609772,
+      "Precision@5": 0.053211920529801324,
+      "Recall@5": 0.26605960264900663,
+      "HR@10": 0.4185430463576159,
+      "NDCG@10": 0.2175353377149963,
+      "Precision@10": 0.04185430463576159,
+      "Recall@10": 0.4185430463576159,
+      "MRR": 0.18028891273191686,
+      "MeanRank": 21.20248344370861
+    },
+    "ItemKNN (cosine, k=20)": {
+      "HR@5": 0.30678807947019865,
+      "NDCG@5": 0.20027325984087901,
+      "Precision@5": 0.06135761589403973,
+      "Recall@5": 0.30678807947019865,
+      "HR@10": 0.4562913907284768,
+      "NDCG@10": 0.24835260670539164,
+      "Precision@10": 0.04562913907284768,
+      "Recall@10": 0.4562913907284768,
+      "MRR": 0.20888017881360157,
+      "MeanRank": 18.68592715231788
+    }
+  },
+  "rating_error_metrics": {
+    "applicable_as_rating_prediction": false,
+    "why_not": "The model outputs a softmax distribution over the item vocabulary and is trained with sparse categorical cross-entropy for next-item ranking. It never receives or predicts the explicit Rating column, so classical rating-prediction RMSE/MAE is undefined for this architecture.",
+    "surrogate_definition": "Error between the predicted probability of each of the 100 candidates and a binary relevance target (1 for the held-out positive item, 0 for the 99 sampled negatives), averaged over all candidate slots.",
+    "RMSE_raw_softmax_vs_binary_relevance": 0.09845313581416919,
+    "MAE_raw_softmax_vs_binary_relevance": 0.01009629043698997,
+    "RMSE_candidate_normalized_vs_binary_relevance": 0.089051324790145,
+    "MAE_candidate_normalized_vs_binary_relevance": 0.014632702043319014
+  },
+  "beyond_accuracy_metrics": {
+    "recommendation_list_size": 10,
+    "scope": "top-10 over the full catalog for every test user (padding index 0 excluded); computed identically for the proposed model and both baselines",
+    "seen_item_filtering": "none - no method filters out items already in the user's training history, so the list-generation procedure is identical across methods",
+    "coverage_definition": "fraction of catalog items appearing in at least one test user's top-10 list",
+    "diversity_definition": "mean intra-list dissimilarity: average over all item pairs in a list of (1 - cosine similarity) between the model's learned item embeddings, then averaged over users. No genre features are wired into the model, so the embedding space is used as the item similarity space. The SAME embedding space is used to score all three methods' lists, so this measures list quality, not each method's own representation.",
+    "novelty_definition": "mean self-information -log2(p_i) of recommended items, where p_i = (train_count_i + 1) / (total_train_interactions + catalog_size) (Laplace smoothing so that never-trained items stay finite).",
+    "popularity_caveat": "TopPop is user-independent, so all test users receive the identical top-10 list; its coverage is therefore capped at 10/3706 by construction.",
+    "per_method": {
+      "Proposed (Hybrid NCF+LSTM+Attention)": {
+        "coverage": 0.6200755531570427,
+        "coverage_unique_items": 2298,
+        "diversity": 0.7206471882464475,
+        "novelty_bits": 10.397177153558005,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 60400
+      },
+      "Popularity (TopPop)": {
+        "coverage": 0.002698327037236913,
+        "coverage_unique_items": 10,
+        "diversity": 0.6765267848968506,
+        "novelty_bits": 8.483642234489974,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 60400
+      },
+      "ItemKNN (cosine, k=20)": {
+        "coverage": 0.09390178089584458,
+        "coverage_unique_items": 348,
+        "diversity": 0.6773913010066708,
+        "novelty_bits": 8.778236427332688,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 60400
+      }
+    }
+  },
+  "baselines": {
+    "Popularity (TopPop)": "candidates ranked by their training-set frequency; ties broken by a fixed seed-42 random key",
+    "ItemKNN (cosine, k=20)": "item-based CF: cosine similarity on the binary user-item training matrix; each candidate is scored by the sum of its top-20 similarities to the items in the user's training history (self-similarity excluded)"
+  }
+}

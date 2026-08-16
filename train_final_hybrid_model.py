@@ -36,11 +36,22 @@ def main(domain):
         print(f"فایل '{processed_file}' پیدا نشد.")
         return
 
-    # --- بارگذاری آرایه‌های از پیش تقسیم‌شده (leave-one-out) ---
+    # --- بارگذاری آرایه‌های از پیش تقسیم‌شده (leave-TWO-out) ---
+    missing = [k for k in ('X_user_val', 'X_item_val', 'X_time_val', 'y_val') if k not in data.files]
+    if missing:
+        print(f"خطا: کلیدهای اعتبارسنجی در فایل داده نیستند: {missing}")
+        print("لطفاً ابتدا build_dataset.py را دوباره اجرا کنید.")
+        return
+
     X_user_train = data['X_user_train']
     X_item_train = data['X_item_train']
     X_time_train = data['X_time_train']
     y_train      = data['y_train']
+
+    X_user_val   = data['X_user_val']
+    X_item_val   = data['X_item_val']
+    X_time_val   = data['X_time_val']
+    y_val        = data['y_val']
 
     X_user_test  = data['X_user_test']
     X_item_test  = data['X_item_test']
@@ -56,12 +67,15 @@ def main(domain):
     print(f"تعداد آیتم‌ها: {n_items}")
     print(f"تعداد دسته‌های زمانی: {n_time_features}")
 
-    print("\n--- ۲. تقسیم داده‌ها (leave-one-out) ---")
+    print("\n--- ۲. تقسیم داده‌ها (leave-TWO-out) ---")
     X_train = [X_user_train, X_item_train, X_time_train]
+    X_val   = [X_user_val,   X_item_val,   X_time_val]
     X_test  = [X_user_test,  X_item_test,  X_time_test]
 
     print(f"تعداد نمونه‌های آموزشی: {len(y_train)}")
+    print(f"تعداد نمونه‌های اعتبارسنجی (یک به‌ازای هر کاربر): {len(y_val)}")
     print(f"تعداد نمونه‌های تست (یک به‌ازای هر کاربر): {len(y_test)}")
+    print("مجموعه تست فقط برای ارزیابی نهایی استفاده می‌شود و به fit() داده نمی‌شود.")
 
 
     print("\n--- ۳. ساخت معماری نهایی (NCF + Dual-LSTM + Masked-Attention) ---")
@@ -123,7 +137,8 @@ def main(domain):
     early_stopper = EarlyStopping(monitor='val_top_10_acc', patience=3, verbose=1, mode='max', restore_best_weights=True)
 
     print(f"شروع آموزش مدل نهایی {domain}...")
-    history = model.fit(X_train, y_train, batch_size=256, epochs=100, validation_data=(X_test, y_test), callbacks=[early_stopper])
+    # EarlyStopping فقط روی مجموعه اعتبارسنجی؛ مجموعه تست دست‌نخورده می‌ماند.
+    history = model.fit(X_train, y_train, batch_size=256, epochs=100, validation_data=(X_val, y_val), callbacks=[early_stopper])
 
     print("\n--- ۵. ذخیره تاریخچه آموزش و رسم نمودارها ---")
     history_keys = list(history.history.keys())
@@ -174,7 +189,8 @@ def main(domain):
     else:
         print(f"هشدار: کلید top_10_acc در history پیدا نشد. کلیدهای موجود: {history_keys}")
 
-    print("\n--- ۶. ارزیابی نهایی مدل (Full-Vocab Keras Metrics) ---")
+    print("\n--- ۶. ارزیابی نهایی مدل روی مجموعه تست (Full-Vocab Keras Metrics) ---")
+    print("توجه: این مجموعه در طول آموزش و EarlyStopping اصلاً دیده نشده است.")
     results = model.evaluate(X_test, y_test)
     print(f"✅ مدل {domain} (Final Hybrid) با موفقیت آموزش دید.")
     print(f"Loss (خطا) روی داده‌های تست: {results[0]:.4f}")
@@ -184,12 +200,13 @@ def main(domain):
     model.save(model_file)
     print(f"مدل نهایی در '{model_file}' ذخیره شد.")
 
-    print("\n--- ۷. ارزیابی NCF-Protocol: HR@10 و NDCG@10 (1 مثبت در برابر 99 منفی) ---")
+    print("\n--- ۷. ارزیابی NCF-Protocol روی مجموعه تست: HR@10، NDCG@10 و میانگین رتبه (1 مثبت در برابر 99 منفی) ---")
     NUM_NEG = 99
     EVAL_CHUNK = 512
     rng = np.random.default_rng(seed=42)
     hits = 0
     ndcg_sum = 0.0
+    rank_sum = 0
     n_test = len(y_test)
 
     print(f"پیش‌بینی دسته‌ای برای {n_test} کاربر تست...")
@@ -213,23 +230,27 @@ def main(domain):
 
             order = np.argsort(scores)[::-1]
             ranked = candidates[order]
-            top10 = ranked[:10]
 
-            if target in top10:
+            # رتبه هدف در میان کل ۱۰۰ کاندید (۱-ایندکس)
+            rank = int(np.where(ranked == target)[0][0]) + 1
+            rank_sum += rank
+            if rank <= 10:
                 hits += 1
-                rank = int(np.where(top10 == target)[0][0]) + 1  # 1-indexed
                 ndcg_sum += 1.0 / np.log2(rank + 1)
 
         if (start // EVAL_CHUNK) % 10 == 0:
             print(f"  پیشرفت: {end}/{n_test}")
 
-    hr10   = hits / n_test
-    ndcg10 = ndcg_sum / n_test
+    hr10      = hits / n_test
+    ndcg10    = ndcg_sum / n_test
+    mean_rank = rank_sum / n_test
 
     print("\n" + "=" * 55)
-    print(f"  دامنه: {domain.upper()}")
-    print(f"  HR@10  (NCF Protocol, 1 vs {NUM_NEG}): {hr10  * 100:.2f}%")
-    print(f"  NDCG@10(NCF Protocol, 1 vs {NUM_NEG}): {ndcg10 * 100:.2f}%")
+    print(f"  دامنه: {domain.upper()}  (ارزیابی فقط روی مجموعه تست)")
+    print(f"  اندازه‌ها → train: {len(y_train)} | val: {len(y_val)} | test: {n_test}")
+    print(f"  HR@10     (NCF Protocol, 1 vs {NUM_NEG}): {hr10   * 100:.2f}%")
+    print(f"  NDCG@10   (NCF Protocol, 1 vs {NUM_NEG}): {ndcg10 * 100:.2f}%")
+    print(f"  Mean Rank (NCF Protocol, 1 vs {NUM_NEG}): {mean_rank:.2f} از {NUM_NEG + 1}")
     print("=" * 55)
 
 if __name__ == "__main__":
