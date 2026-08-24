@@ -59,16 +59,38 @@
   },
   "beyond_accuracy_metrics": {
     "recommendation_list_size": 10,
-    "scope": "top-10 over the full catalog for every test user (padding index 0 excluded)",
-    "coverage": 0.8535,
-    "coverage_unique_items": 8535,
+    "scope": "top-10 over the full catalog for every test user (padding index 0 excluded); computed identically for the proposed model and both baselines",
+    "seen_item_filtering": "none - no method filters out items already in the user's training history, so the list-generation procedure is identical across methods",
     "coverage_definition": "fraction of catalog items appearing in at least one test user's top-10 list",
-    "diversity": 0.6170753775570038,
-    "diversity_definition": "mean intra-list dissimilarity: average over all item pairs in a list of (1 - cosine similarity) between the model's learned item embeddings, then averaged over users. No genre features are wired into the model, so the embedding space is used as the item similarity space.",
-    "novelty_bits": 12.097841166474197,
+    "diversity_definition": "mean intra-list dissimilarity: average over all item pairs in a list of (1 - cosine similarity) between the model's learned item embeddings, then averaged over users. No genre features are wired into the model, so the embedding space is used as the item similarity space. The SAME embedding space is used to score all three methods' lists, so this measures list quality, not each method's own representation.",
     "novelty_definition": "mean self-information -log2(p_i) of recommended items, where p_i = (train_count_i + 1) / (total_train_interactions + catalog_size) (Laplace smoothing so that never-trained items stay finite).",
-    "recommended_slots_with_zero_train_frequency": 0,
-    "total_recommended_slots": 534240
+    "popularity_caveat": "TopPop is user-independent, so all test users receive the identical top-10 list; its coverage is therefore capped at 10/10000 by construction.",
+    "per_method": {
+      "Proposed (Hybrid NCF+LSTM+Attention)": {
+        "coverage": 0.8535,
+        "coverage_unique_items": 8535,
+        "diversity": 0.6170753775570038,
+        "novelty_bits": 12.097841166474197,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 534240
+      },
+      "Popularity (TopPop)": {
+        "coverage": 0.001,
+        "coverage_unique_items": 10,
+        "diversity": 0.7283328771591187,
+        "novelty_bits": 8.400198000533473,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 534240
+      },
+      "ItemKNN (cosine, k=20)": {
+        "coverage": 0.2648,
+        "coverage_unique_items": 2648,
+        "diversity": 0.6175039590323274,
+        "novelty_bits": 10.10286897887185,
+        "recommended_slots_with_zero_train_frequency": 0,
+        "total_recommended_slots": 534240
+      }
+    }
   },
   "baselines": {
     "Popularity (TopPop)": "candidates ranked by their training-set frequency; ties broken by a fixed seed-42 random key",

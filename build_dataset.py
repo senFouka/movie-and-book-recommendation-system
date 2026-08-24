@@ -24,6 +24,256 @@ def pad(seqs, maxlen):
         return np.zeros((0, maxlen), dtype='int32')
     return pad_sequences(seqs, maxlen=maxlen, padding='pre')
 
+
+# ===========================================================================
+# ویژگی‌های محتوایی آیتم (Content features)
+# ---------------------------------------------------------------------------
+# این بخش هیچ‌کدام از آرایه‌های train/val/test را تغییر نمی‌دهد؛ فقط چند کلید
+# جدید به فایل npz اضافه می‌کند که با «اندیس آیتم» موجود هم‌تراز هستند:
+#   encoded_item_id = item_encoder.transform([original_id])[0] + 1
+#   → سطر ۰ همیشه مربوط به پدینگ است و مقدارش صفر/ناشناخته می‌ماند.
+# ===========================================================================
+
+CONTENT_KEYS = (
+    'item_genre_matrix', 'n_genres', 'genre_vocab',        # movie
+    'item_author_ids', 'n_authors', 'author_vocab',        # book
+)
+
+
+def _is_blank(value):
+    """تشخیص مقدار خالی/گمشده برای فیلدهای متنی."""
+    if value is None:
+        return True
+    if isinstance(value, float) and np.isnan(value):
+        return True
+    return str(value).strip() == ''
+
+
+def build_movie_content(data_dir, item_encoder, n_items):
+    """بردار چندبرچسبی ژانر (multi-hot) به‌ازای هر آیتم فیلم."""
+    movies_file = os.path.join(data_dir, 'movies.dat')
+    if not os.path.exists(movies_file):
+        print(f"هشدار: فایل '{movies_file}' پیدا نشد؛ ویژگی محتوایی ساخته نشد.")
+        return {}
+
+    movies = pd.read_csv(
+        movies_file, sep='::', names=['ItemID', 'Title', 'Genres'],
+        engine='python', encoding='latin-1'
+    )
+    print(f"movies.dat خوانده شد: {len(movies)} فیلم")
+
+    genres_by_item = dict(zip(movies['ItemID'], movies['Genres']))
+    titles_by_item = dict(zip(movies['ItemID'], movies['Title']))
+
+    classes = item_encoder.classes_
+    assert len(classes) + 1 == n_items, \
+        f"ناسازگاری اندیس آیتم: {len(classes)} + 1 != {n_items}"
+
+    # ۱) استخراج ژانرها فقط برای آیتم‌هایی که در اندیس مدل حضور دارند
+    genres_per_encoded = {}          # encoded_id → list[str]
+    n_not_found = 0                  # آیتمی که اصلاً در movies.dat نیست
+    n_blank_genres = 0               # آیتمی که فیلد ژانرش خالی است
+    for pos, original_id in enumerate(classes):
+        encoded_id = pos + 1
+        raw = genres_by_item.get(original_id)
+        if raw is None:
+            n_not_found += 1
+            genres_per_encoded[encoded_id] = []
+            continue
+        if _is_blank(raw):
+            n_blank_genres += 1
+            genres_per_encoded[encoded_id] = []
+            continue
+        parts = [g.strip() for g in str(raw).split('|')]
+        parts = [g for g in parts if g != '']
+        if not parts:
+            n_blank_genres += 1
+        genres_per_encoded[encoded_id] = parts
+
+    # ۲) واژگان ثابت ژانر — فقط از روی همین داده و به‌صورت مرتب (تکرارپذیر)
+    genre_vocab = sorted({g for gs in genres_per_encoded.values() for g in gs})
+    n_genres = len(genre_vocab)
+    genre_to_col = {g: j for j, g in enumerate(genre_vocab)}
+
+    # ۳) ماتریس multi-hot هم‌تراز با اندیس آیتم (سطر ۰ = پدینگ = تماماً صفر)
+    item_genre_matrix = np.zeros((n_items, n_genres), dtype='float32')
+    for encoded_id, gs in genres_per_encoded.items():
+        for g in gs:
+            item_genre_matrix[encoded_id, genre_to_col[g]] = 1.0
+
+    n_items_with_genre = int((item_genre_matrix[1:].sum(axis=1) > 0).sum())
+    print(f"واژگان ژانر ({n_genres} تا): {', '.join(genre_vocab)}")
+    print(f"آیتم‌های دارای حداقل یک ژانر: {n_items_with_genre} از {n_items - 1}")
+    print(f"آیتم‌های پیدانشده در movies.dat: {n_not_found}")
+    print(f"آیتم‌های با فیلد ژانر خالی: {n_blank_genres}")
+    print(f"میانگین تعداد ژانر به‌ازای هر آیتم: {item_genre_matrix[1:].sum() / max(n_items - 1, 1):.2f}")
+    print(f"سطر پدینگ (اندیس ۰) تماماً صفر است: {not item_genre_matrix[0].any()}")
+
+    # ۴) نمونه‌بررسی (spot-check) هم‌ترازی
+    print("\n[spot-check] هم‌ترازی جست‌وجوی ژانر با اندیس آیتم:")
+    probe = [1, 2, n_items // 2, n_items - 2, n_items - 1]
+    for encoded_id in sorted({p for p in probe if 1 <= p < n_items}):
+        original_id = classes[encoded_id - 1]
+        decoded = [genre_vocab[j] for j in np.nonzero(item_genre_matrix[encoded_id])[0]]
+        title = titles_by_item.get(original_id, '<در movies.dat نیست>')
+        print(f"  encoded={encoded_id:<5} original MovieID={original_id:<6} "
+              f"| {title} | source='{genres_by_item.get(original_id)}' "
+              f"| matrix={'|'.join(decoded)}")
+
+    return {
+        'item_genre_matrix': item_genre_matrix,
+        'n_genres': n_genres,
+        'genre_vocab': np.array(genre_vocab),
+    }
+
+
+def _primary_author(raw):
+    """نویسنده اصلی = اولین نویسنده در فهرست جداشده با کاما. برای مقدار خالی None."""
+    if _is_blank(raw):
+        return None, 0
+    parts = [p.strip() for p in str(raw).split(',')]
+    parts = [p for p in parts if p != '']
+    if not parts:
+        return None, 0
+    return parts[0], len(parts)
+
+
+def build_book_content(data_dir, item_encoder, n_items):
+    """شناسه نویسنده (label-encoded) به‌ازای هر آیتم کتاب؛ شناسه ۰ = پدینگ/ناشناخته."""
+    books_file = os.path.join(data_dir, 'books.csv')
+    if not os.path.exists(books_file):
+        print(f"هشدار: فایل '{books_file}' پیدا نشد؛ ویژگی محتوایی ساخته نشد.")
+        return {}
+
+    books = pd.read_csv(books_file, usecols=['book_id', 'authors', 'original_title'])
+    print(f"books.csv خوانده شد: {len(books)} کتاب")
+
+    authors_by_item = dict(zip(books['book_id'], books['authors']))
+    titles_by_item = dict(zip(books['book_id'], books['original_title']))
+
+    classes = item_encoder.classes_
+    assert len(classes) + 1 == n_items, \
+        f"ناسازگاری اندیس آیتم: {len(classes)} + 1 != {n_items}"
+
+    # ۱) استخراج نویسنده اصلی برای آیتم‌های حاضر در اندیس مدل
+    primary_by_encoded = {}          # encoded_id → str | None
+    n_not_found = 0                  # آیتمی که در books.csv نیست
+    n_blank_authors = 0              # فیلد نویسنده خالی/NaN
+    n_multi_authors = 0              # بیش از یک نویسنده → فقط اولی استفاده می‌شود
+    for pos, original_id in enumerate(classes):
+        encoded_id = pos + 1
+        if original_id not in authors_by_item:
+            n_not_found += 1
+            primary_by_encoded[encoded_id] = None
+            continue
+        author, count = _primary_author(authors_by_item[original_id])
+        if author is None:
+            n_blank_authors += 1
+        elif count > 1:
+            n_multi_authors += 1
+        primary_by_encoded[encoded_id] = author
+
+    # ۲) label-encoding نویسنده‌ها؛ +۱ تا شناسه ۰ برای پدینگ/ناشناخته آزاد بماند
+    known_authors = sorted({a for a in primary_by_encoded.values() if a is not None})
+    author_encoder = LabelEncoder()
+    author_encoder.fit(known_authors)
+    author_to_id = {a: i + 1 for i, a in enumerate(author_encoder.classes_)}
+    n_authors = len(author_encoder.classes_) + 1
+
+    # ۳) جدول جست‌وجو هم‌تراز با اندیس آیتم (خانه ۰ = پدینگ = ۰)
+    item_author_ids = np.zeros((n_items,), dtype='int32')
+    for encoded_id, author in primary_by_encoded.items():
+        if author is not None:
+            item_author_ids[encoded_id] = author_to_id[author]
+
+    author_vocab = np.array(['<PAD/UNK>'] + list(author_encoder.classes_))
+
+    n_items_with_author = int((item_author_ids[1:] > 0).sum())
+    print(f"نویسنده‌های یکتا (با احتساب پدینگ/ناشناخته): {n_authors}")
+    print(f"آیتم‌های دارای نویسنده: {n_items_with_author} از {n_items - 1}")
+    print(f"کتاب‌های چندنویسنده‌ای (فقط نویسنده اول استفاده شد): {n_multi_authors}")
+    print(f"کتاب‌های با فیلد نویسنده خالی → شناسه ۰: {n_blank_authors}")
+    print(f"آیتم‌های پیدانشده در books.csv → شناسه ۰: {n_not_found}")
+    print(f"خانه پدینگ (اندیس ۰) برابر صفر است: {item_author_ids[0] == 0}")
+
+    # ۴) نمونه‌بررسی (spot-check) هم‌ترازی
+    print("\n[spot-check] هم‌ترازی جست‌وجوی نویسنده با اندیس آیتم:")
+    probe = [1, 2, n_items // 2, n_items - 2, n_items - 1]
+    for encoded_id in sorted({p for p in probe if 1 <= p < n_items}):
+        original_id = classes[encoded_id - 1]
+        author_id = int(item_author_ids[encoded_id])
+        print(f"  encoded={encoded_id:<6} original book_id={original_id:<6} "
+              f"| {titles_by_item.get(original_id, '<در books.csv نیست>')} "
+              f"| source='{authors_by_item.get(original_id)}' "
+              f"| author_id={author_id} → '{author_vocab[author_id]}'")
+
+    joblib.dump(author_encoder, os.path.join(data_dir, 'author_encoder.joblib'))
+    print(f"انکودر نویسنده در '{os.path.join(data_dir, 'author_encoder.joblib')}' ذخیره شد.")
+
+    return {
+        'item_author_ids': item_author_ids,
+        'n_authors': n_authors,
+        'author_vocab': author_vocab,
+    }
+
+
+def build_content_features(domain, data_dir, item_encoder, n_items):
+    """ساخت جدول جست‌وجوی محتوا برای دامنه؛ خروجی مستقیماً به npz اضافه می‌شود."""
+    if domain == 'movie':
+        return build_movie_content(data_dir, item_encoder, n_items)
+    if domain == 'book':
+        return build_book_content(data_dir, item_encoder, n_items)
+    print(f"هشدار: ویژگی محتوایی برای دامنه '{domain}' تعریف نشده است.")
+    return {}
+
+
+def content_only(domain):
+    """
+    فقط ویژگی‌های محتوایی را به فایل npz موجود اضافه می‌کند.
+    آرایه‌های train/val/test بدون هیچ تغییری بازنویسی می‌شوند (بررسی می‌شود).
+    """
+    print(f"--- افزودن ویژگی محتوایی به داده موجود: {domain} ---")
+    data_dir = f"{domain}_data"
+    npz_path = os.path.join(data_dir, 'processed_data.npz')
+    encoder_path = os.path.join(data_dir, 'item_encoder.joblib')
+
+    for path in (npz_path, encoder_path):
+        if not os.path.exists(path):
+            print(f"خطا: فایل '{path}' پیدا نشد. ابتدا build_dataset.py {domain} را اجرا کنید.")
+            return
+
+    item_encoder = joblib.load(encoder_path)
+    with np.load(npz_path, allow_pickle=False) as z:
+        existing = {k: z[k] for k in z.files}
+    n_items = int(existing['n_items'])
+    print(f"داده موجود بارگذاری شد؛ کلیدها: {sorted(existing.keys())}")
+
+    content_arrays = build_content_features(domain, data_dir, item_encoder, n_items)
+    if not content_arrays:
+        print("هیچ ویژگی محتوایی ساخته نشد؛ فایل دست‌نخورده باقی ماند.")
+        return
+
+    # کلیدهای محتوایی قدیمی حذف و کلیدهای بقیه دقیقاً حفظ می‌شوند
+    preserved = {k: v for k, v in existing.items() if k not in CONTENT_KEYS}
+    payload = dict(preserved)
+    payload.update(content_arrays)
+
+    # نوشتن در فایل موقت و سپس جایگزینی اتمیک تا در صورت قطع شدن، داده اصلی سالم بماند
+    tmp_path = npz_path + '.tmp.npz'
+    np.savez_compressed(tmp_path, **payload)
+    with np.load(tmp_path, allow_pickle=False) as z:
+        for k, v in preserved.items():
+            assert k in z.files and np.array_equal(z[k], v), f"آرایه '{k}' تغییر کرده است!"
+    os.replace(tmp_path, npz_path)
+
+    # تأیید اینکه هیچ آرایه‌ی تقسیم‌بندی تغییر نکرده است
+    with np.load(npz_path, allow_pickle=False) as z:
+        for k, v in preserved.items():
+            assert k in z.files and np.array_equal(z[k], v), f"آرایه '{k}' تغییر کرده است!"
+        print(f"\n[check] {len(preserved)} آرایه‌ی قبلی بدون تغییر باقی ماندند: OK")
+        print(f"کلیدهای جدید: {sorted(content_arrays.keys())}")
+    print(f"فایل '{npz_path}' به‌روزرسانی شد.")
+
 def main(domain):
     print(f"--- شروع پردازش برای دامنه: {domain} ---")
     
@@ -212,10 +462,12 @@ def main(domain):
     X_time_test  = pad(te_time_seqs, MAX_SEQUENCE_LENGTH)
     y_test       = np.array(te_labels)
 
+    print("\n--- ۴.۱ ساخت ویژگی‌های محتوایی آیتم ---")
+    content_arrays = build_content_features(domain, data_dir, item_encoder, n_items)
+
     print("\n--- ۵. ذخیره فایل‌ها ---")
     output_path = os.path.join(data_dir, 'processed_data.npz')
-    np.savez_compressed(
-        output_path,
+    payload = dict(
         X_user_train=X_user_train, X_item_train=X_item_train,
         X_time_train=X_time_train, y_train=y_train,
         X_user_val=X_user_val,     X_item_val=X_item_val,
@@ -224,6 +476,8 @@ def main(domain):
         X_time_test=X_time_test,   y_test=y_test,
         n_users=n_users, n_items=n_items, n_time_features=n_time_features
     )
+    payload.update(content_arrays)
+    np.savez_compressed(output_path, **payload)
     print(f"داده‌های پردازش شده در '{output_path}' ذخیره شدند.")
     print(f"اندازه‌های نهایی [{domain}] → train: {len(y_train)} | val: {len(y_val)} | test: {len(y_test)}")
 
@@ -233,10 +487,14 @@ def main(domain):
     print("انکودرها با موفقیت ذخیره شدند.")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) == 2:
+        main(sys.argv[1])
+    elif len(sys.argv) == 3 and sys.argv[2] == '--content-only':
+        # فقط کلیدهای محتوایی را به npz موجود اضافه می‌کند؛ تقسیم‌بندی دست‌نخورده می‌ماند.
+        content_only(sys.argv[1])
+    else:
         print("خطا در اجرا. لطفاً دامنه را مشخص کنید.")
         print("مثال: python build_dataset.py movie")
         print("   یا: python build_dataset.py book")
-    else:
-        domain = sys.argv[1]
-        main(domain)
+        print("افزودن ویژگی محتوایی به داده موجود (بدون بازسازی تقسیم‌بندی):")
+        print("       python build_dataset.py movie --content-only")

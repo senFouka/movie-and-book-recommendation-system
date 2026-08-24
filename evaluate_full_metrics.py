@@ -224,11 +224,13 @@ class BeyondAccuracy:
 
 
 # ----------------------------------------------------------------------------
-def main(domain):
+def main(domain, variant=''):
+    # variant='' → مدل پایه؛ variant='content' → مدل دارای شاخه محتوا
+    suffix = f'_{variant}' if variant else ''
     data_dir = f"{domain}_data"
     processed_file = os.path.join(data_dir, 'processed_data.npz')
-    model_file = os.path.join(data_dir, 'final_hybrid_model.keras')
-    out_file = os.path.join(data_dir, 'full_metrics.json')
+    model_file = os.path.join(data_dir, f'final_hybrid{suffix}_model.keras')
+    out_file = os.path.join(data_dir, f'full_metrics{suffix}.json')
 
     print(f"--- ۱. بارگذاری داده و مدل ({domain}) ---")
     if not os.path.exists(processed_file):
@@ -539,9 +541,12 @@ def main(domain):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) == 2:
+        main(sys.argv[1])
+    elif len(sys.argv) == 3:
+        main(sys.argv[1], sys.argv[2])
+    else:
         print("خطا در اجرا. لطفاً دامنه را مشخص کنید.")
         print("مثال: python evaluate_full_metrics.py movie")
         print("   یا: python evaluate_full_metrics.py book")
-    else:
-        main(sys.argv[1])
+        print("برای مدل دارای شاخه محتوا: python evaluate_full_metrics.py movie content")
