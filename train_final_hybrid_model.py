@@ -131,7 +131,7 @@ def build_content_branch(domain, data, item_seq_input, n_items, max_sequence_len
             CONTENT_PROJECTION_SIZE, activation='relu', name='GenreProjection'
         )(genre_seq)
 
-        content_vec = LSTM(CONTENT_LSTM_UNITS, name='LSTM_Content')(content_seq)
+        content_vec = LSTM(CONTENT_LSTM_UNITS, use_cudnn=False, name='LSTM_Content')(content_seq)
         return content_vec, f"genre multi-hot ({n_genres}) → Dense({CONTENT_PROJECTION_SIZE}) → LSTM({CONTENT_LSTM_UNITS})"
 
     if kind == 'author':
@@ -160,7 +160,7 @@ def build_content_branch(domain, data, item_seq_input, n_items, max_sequence_len
             mask_zero=True, name='AuthorEmbedding'
         )(author_id_seq)
 
-        content_vec = LSTM(CONTENT_LSTM_UNITS, name='LSTM_Content')(author_seq_embedding)
+        content_vec = LSTM(CONTENT_LSTM_UNITS, use_cudnn=False, name='LSTM_Content')(author_seq_embedding)
         return content_vec, f"author id ({n_authors}) → Embedding({AUTHOR_EMBEDDING_SIZE}) → LSTM({CONTENT_LSTM_UNITS})"
 
     raise RuntimeError(f"نوع محتوای ناشناخته: {kind}")
@@ -292,12 +292,12 @@ def main(domain, summary_only=False, content_override=None):
     # بخش آیتم
     item_embedding_layer = Embedding(input_dim=n_items, output_dim=ITEM_EMBEDDING_SIZE, name='ItemEmbedding', mask_zero=True)
     item_seq_embedding = item_embedding_layer(item_seq_input)
-    lstm_item_out = LSTM(LSTM_UNITS_ITEM, return_sequences=True, name='LSTM_Item')(item_seq_embedding)
+    lstm_item_out = LSTM(LSTM_UNITS_ITEM, return_sequences=True, use_cudnn=False, name='LSTM_Item')(item_seq_embedding)
 
     # بخش زمان
     time_embedding_layer = Embedding(input_dim=n_time_features, output_dim=TIME_EMBEDDING_SIZE, name='TimeEmbedding', mask_zero=True)
     time_seq_embedding = time_embedding_layer(time_seq_input)
-    lstm_time_out = LSTM(LSTM_UNITS_TIME, return_sequences=True, name='LSTM_Time')(time_seq_embedding)
+    lstm_time_out = LSTM(LSTM_UNITS_TIME, return_sequences=True, use_cudnn=False, name='LSTM_Time')(time_seq_embedding)
 
     # ادغام خروجی‌های LSTM (ماسک‌ها حفظ می‌شوند)
     combined_lstm_out = Concatenate(axis=2, name='CombineLSTMs')([lstm_item_out, lstm_time_out])
